@@ -136,6 +136,8 @@ struct ModuleDescriptor
   //A list of sections
   ModuleSections Sections;
 
+  uint32_t PrimaryModule; // SymDrive
+
   ModuleDescriptor() {
     Pid = 0;
     NativeBase = 0;

@@ -207,6 +207,7 @@ public:
     /***********************/
     /* Runtime information */
     S2EExecutor* getExecutor() { return m_s2eExecutor; }
+    const S2EExecutor* getExecutor() const { return m_s2eExecutor; }
 
     //XXX: A plugin can hold cached state information. When a state is deleted,
     //remove all the cached info from all plugins.

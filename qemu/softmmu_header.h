@@ -196,7 +196,7 @@ glue(glue(glue(CPU_PREFIX, ld), USUFFIX), MEMSUFFIX)(ENV_PARAM
 
         //XXX: Fix this to be on the dataflow
         //res = S2E_TRACE_MEMORY(addr, physaddr, res, 0, 0);
-        S2E_TRACE_MEMORY(addr, physaddr, res, 0, 0);
+        // S2E_TRACE_MEMORY(addr, physaddr, res, 0, 0); // MJR
     }
     return res;
 }
@@ -232,7 +232,7 @@ glue(glue(glue(CPU_PREFIX, lds), SUFFIX), MEMSUFFIX)(ENV_PARAM
 #endif
             res = glue(glue(lds, SUFFIX), _raw)((uint8_t *)physaddr);
 
-        S2E_TRACE_MEMORY(addr, physaddr, res, 0, 0);
+        // S2E_TRACE_MEMORY(addr, physaddr, res, 0, 0); // MJR
     }
     return res;
 }
@@ -272,7 +272,7 @@ glue(glue(glue(CPU_PREFIX, st), SUFFIX), MEMSUFFIX)(ENV_PARAM target_ulong ptr,
 #endif
             glue(glue(st, SUFFIX), _raw)((uint8_t *)physaddr, v);
 
-        S2E_TRACE_MEMORY(addr, physaddr, v, 1, 0);
+        // S2E_TRACE_MEMORY(addr, physaddr, v, 1, 0); // MJR
     }
 }
 

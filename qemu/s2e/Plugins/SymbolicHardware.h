@@ -160,6 +160,9 @@ private:
     uint32_t m_classCode;
     uint8_t m_revisionId;
     uint8_t m_interruptPin;
+    uint32_t m_capPM;
+    uint32_t m_capMSI;
+    uint32_t m_capPCIE;
     PciResources m_resources;
 
     PciDeviceDescriptor(const std::string &id);
@@ -175,6 +178,11 @@ public:
     uint32_t getClassCode() const { return m_classCode; }
     uint8_t getRevisionId() const { return m_revisionId; }
     uint8_t getInterruptPin() const { return m_interruptPin; }
+
+    // Capabilities
+    uint32_t getCapPM() const { return m_capPM; }
+    uint32_t getCapMSI() const { return m_capMSI; }
+    uint32_t getCapPCIE() const { return m_capPCIE; }
 
     const PciResources& getResources() const { return m_resources; }
     static PciDeviceDescriptor* create(SymbolicHardware *plg, ConfigFile *cfg, const std::string &key);
@@ -212,6 +220,7 @@ public:
     bool isSymbolic(uint16_t port) const;
 
     bool isMmioSymbolic(uint64_t physaddress, uint64_t size) const;
+    void onCustomInstruction(S2EExecutionState* state, uint64_t opcode); // SymDrive
     bool setSymbolicMmioRange(S2EExecutionState *state, uint64_t physaddr, uint64_t size);
     bool resetSymbolicMmioRange(S2EExecutionState *state, uint64_t physaddr, uint64_t size);
 private:

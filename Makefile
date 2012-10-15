@@ -1,3 +1,5 @@
+# MJR search for "mjr" to find changes
+
 S2ESRC:=$(CURDIR)/../s2e
 S2EBUILD:=$(CURDIR)
 
@@ -12,7 +14,7 @@ else ifeq ($(OS),Linux)
 JOBS := $(shell grep -c ^processor /proc/cpuinfo)
 endif
 
-all: all-release
+all: all-release all-debug # MJR do both simultaneously
 
 all-release: stamps/qemu-make-release stamps/tools-make-release
 

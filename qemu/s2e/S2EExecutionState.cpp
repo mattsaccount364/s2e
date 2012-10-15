@@ -1166,6 +1166,7 @@ ref<Expr> S2EExecutionState::createSymbolicValue(
 {
 
     std::vector<unsigned char> concreteValues;
+    // concreteValues.resize(Expr::getMinBytesForWidth(width)); // MJR added this line
     return createConcolicValue(name, width, concreteValues);
 }
 
@@ -1835,3 +1836,4 @@ int s2e_is_runnable(S2EExecutionState *state)
 }
 
 } // extern "C"
+

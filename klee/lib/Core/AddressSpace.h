@@ -16,6 +16,7 @@
 #include "klee/Internal/ADT/ImmutableMap.h"
 
 namespace klee {
+  class Executor;
   class ExecutionState;
   class MemoryObject;
   class ObjectState;
@@ -134,6 +135,8 @@ namespace klee {
     /// \retval true The copy succeeded. 
     /// \retval false The copy failed because a read-only object was modified.
     bool copyInConcretes();
+
+    void concretizeAll(Executor *e); // MJR
   };
 } // End klee namespace
 

@@ -66,15 +66,36 @@ namespace s2e {
 //XXX: Fix this
 #define CPU_MMU_INDEX 0
 
+#define MJR_TRACE(ADDRESS, VALUE, WIDTH, ISWRITE, ISDMA)                \
+    do {                                                                \
+        std::vector<ref<Expr> > traceArgs;                              \
+        traceArgs.push_back(ADDRESS);                                   \
+        traceArgs.push_back(VALUE);                                     \
+        traceArgs.push_back(ConstantExpr::create(WIDTH, Expr::Int64));  \
+        traceArgs.push_back(ConstantExpr::create(ISWRITE, Expr::Int64)); \
+        if (!(ISDMA)) {                                                 \
+            S2EExecutor::handlerTraceMemoryAccess(g_s2e->getExecutor(), state, target, traceArgs); \
+        } else {                                                        \
+            S2EExecutor::handlerTraceDMAAccess(g_s2e->getExecutor(), state, target, traceArgs); \
+        }                                                               \
+    } while (0)
+    
 //This is an io_write_chkX_mmu function
 static void io_write_chk(S2EExecutionState *state,
                              target_phys_addr_t physaddr,
                              ref<Expr> val,
                              target_ulong addr,
-                             void *retaddr, Expr::Width width)
+                             void *retaddr,
+                             Expr::Width width, // MJR width in bits
+                             klee::KInstruction* target, // MJR
+                             ref<Expr> symbAddress) // MJR
 {
     target_phys_addr_t origaddr = physaddr;
     MemoryRegion *mr = iotlb_to_region(physaddr);
+
+    // MJR naddr is phys addr in VM, added these two lines:
+    target_ulong naddr = (physaddr & TARGET_PAGE_MASK)+addr;
+    int isDMASymb = g_s2e->getCorePlugin()->isMmioSymbolic(naddr, width / 8);
 
     physaddr = (physaddr & TARGET_PAGE_MASK) + addr;
     if (mr != &io_mem_ram && mr != &io_mem_rom
@@ -84,16 +105,26 @@ static void io_write_chk(S2EExecutionState *state,
         cpu_io_recompile(env, retaddr);
     }
 
-
     env->mem_io_vaddr = addr;
     env->mem_io_pc = (uintptr_t)retaddr;
 #ifdef TARGET_WORDS_BIGENDIAN
     #error This is not implemented yet.
 #else
     if (s2e_ismemfunc(mr, 1)) {
+        // MJR isWrite = 1
+        // MJR isDMA = 1
+        if (isDMASymb) { // MJR added this block
+            MJR_TRACE(symbAddress, val, width, 1, 1); // MJR
+        }
         uintptr_t pa = s2e_notdirty_mem_write(physaddr);
         state->writeMemory(pa, val, S2EExecutionState::HostAddress);
         return;
+    }
+    if (s2e_issymfunc(mr, addr)) { // MJR added this block
+        // MJR isWrite = 1
+        // MJR isDMA = 0
+        MJR_TRACE(symbAddress, val, width, 1, 0); // MJR
+        return; // All done -- no need to "write" to symbolic memory ?? MJR maybe?
     }
 #endif
 
@@ -119,18 +150,24 @@ static void io_write_chk(S2EExecutionState *state,
 static ref<Expr> io_read_chk(S2EExecutionState *state,
                              target_phys_addr_t physaddr,
                              target_ulong addr,
-                             void *retaddr, Expr::Width width)
+                             void *retaddr, Expr::Width width, // MJR width in bits
+                             klee::KInstruction* target, // MJR
+                             ref<Expr> symbAddress) // MJR
 {
     ref<Expr> res;
     target_phys_addr_t origaddr = physaddr;
     MemoryRegion *mr = iotlb_to_region(physaddr);
 
     target_ulong naddr = (physaddr & TARGET_PAGE_MASK)+addr;
-    int isSymb = g_s2e->getCorePlugin()->isMmioSymbolic(naddr, width / 8);;
+    int isDMASymb = g_s2e->getCorePlugin()->isMmioSymbolic(naddr, width / 8); // MJR naddr is phys addr in VM
+    int isSymb = s2e_issymfunc(mr, addr); // MJR
     std::stringstream ss;
     if (isSymb) {
         //If at least one byte is symbolic, generate a label
         ss << "iommuread_" << hexval(naddr) << "@" << hexval(env->eip);
+    }
+    if (isDMASymb) { // MJR added this
+        ss << "dmaread_" << hexval(naddr) << "@" << hexval(env->eip);
     }
 
     //If it is not DMA, then check if it is normal memory
@@ -143,12 +180,27 @@ static ref<Expr> io_read_chk(S2EExecutionState *state,
     }
 
     env->mem_io_vaddr = addr;
-    if (s2e_ismemfunc(mr, 0)) {
-        uintptr_t pa = s2e_notdirty_mem_write(physaddr);
-        if (isSymb) {
-            return state->createSymbolicValue(ss.str(), width);
+    //if (s2e_ismemfunc(mr, 0)) { // MJR
+        if (isDMASymb) { // MJR modified this block
+            // MJR isWrite = 0
+            // MJR isDMA = 1
+            ref<Expr> symbolicResult = state->createSymbolicValue(ss.str(), width);
+            MJR_TRACE(symbAddress, symbolicResult, width, 0, 1); // MJR
+            g_s2e->getCorePlugin()->establishIOMap (ss.str()); // MJR
+            return symbolicResult;
         }
-        return state->readMemory(pa, width, S2EExecutionState::HostAddress);
+// MJR
+//        uintptr_t pa = s2e_notdirty_mem_write(physaddr); // MJR moved this
+//        return state->readMemory(pa, width, S2EExecutionState::HostAddress);
+//    }
+
+    if (isSymb) { // MJR added this block
+        // MJR isWrite = 0
+        // MJR isDMA = 0
+        ref<Expr> symbolicResult = state->createSymbolicValue(ss.str(), width);
+        MJR_TRACE(symbAddress, symbolicResult, width, 0, 0); // MJR
+        g_s2e->getCorePlugin()->establishIOMap (ss.str()); // MJR
+        return symbolicResult;
     }
 
     //By default, call the original io_read function, which is external
@@ -284,9 +336,12 @@ ref<Expr> S2EExecutor::handle_ldst_mmu(Executor* executor,
             ioaddr = env->iotlb[mmu_idx][index];
 
             if (!isWrite)
-                value = io_read_chk(s2estate, ioaddr, addr, retaddr, width);
+                // MJR Added symbAddress
+                value = io_read_chk(s2estate, ioaddr, addr, retaddr, width, target, symbAddress);
 
             //Trace the access
+            /*
+              MJR
             std::vector<ref<Expr> > traceArgs;
             traceArgs.push_back(symbAddress);
             traceArgs.push_back(ConstantExpr::create(addr + ioaddr, Expr::Int64));
@@ -295,9 +350,11 @@ ref<Expr> S2EExecutor::handle_ldst_mmu(Executor* executor,
             traceArgs.push_back(ConstantExpr::create(isWrite, Expr::Int64)); //isWrite
             traceArgs.push_back(ConstantExpr::create(1, Expr::Int64)); //isIO
             handlerTraceMemoryAccess(executor, state, target, traceArgs);
+            */
 
            if (isWrite)
-               io_write_chk(s2estate, ioaddr, value, addr, retaddr, width);
+               // MJR Added symbAddress
+               io_write_chk(s2estate, ioaddr, value, addr, retaddr, width, target, symbAddress);
 
         } else if (unlikely(((addr & ~S2E_RAM_OBJECT_MASK) + data_size - 1) >= S2E_RAM_OBJECT_SIZE)) {
             /* slow unaligned access (it spans two pages or IO) */
@@ -356,6 +413,8 @@ ref<Expr> S2EExecutor::handle_ldst_mmu(Executor* executor,
             }
 
             //Trace the access
+            /*
+              MJR
             std::vector<ref<Expr> > traceArgs;
             traceArgs.push_back(symbAddress);
             traceArgs.push_back(ConstantExpr::create(addr + addend, Expr::Int64));
@@ -364,6 +423,7 @@ ref<Expr> S2EExecutor::handle_ldst_mmu(Executor* executor,
             traceArgs.push_back(ConstantExpr::create(isWrite, Expr::Int64)); //isWrite
             traceArgs.push_back(ConstantExpr::create(0, Expr::Int64)); //isIO
             handlerTraceMemoryAccess(executor, state, target, traceArgs);
+            */
        }
     } else {
         /* the page is not in the TLB : fill it */
@@ -491,6 +551,8 @@ void S2EExecutor::handle_ldst_kernel(Executor* executor,
         }
 
         //Trace the access
+        /*
+          MJR
         std::vector<ref<Expr> > traceArgs;
         traceArgs.push_back(constantAddress);
         traceArgs.push_back(ConstantExpr::create(physaddr, Expr::Int64));
@@ -499,6 +561,7 @@ void S2EExecutor::handle_ldst_kernel(Executor* executor,
         traceArgs.push_back(ConstantExpr::create(isWrite, Expr::Int64)); //isWrite
         traceArgs.push_back(ConstantExpr::create(0, Expr::Int64)); //isIO
         handlerTraceMemoryAccess(executor, state, target, traceArgs);
+        */
 
         if (!isWrite) {
             if (zeroExtend) {

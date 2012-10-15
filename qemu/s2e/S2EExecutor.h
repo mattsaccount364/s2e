@@ -154,7 +154,6 @@ public:
                                 = std::vector<klee::ref<klee::Expr> >());
 
     /* Functions to be called mainly from QEMU */
-
     S2EExecutionState* selectNextState(S2EExecutionState* state);
     klee::ExecutionState* selectNonSpeculativeState(S2EExecutionState *state);
 
@@ -205,6 +204,8 @@ public:
     void initializeStatistics();
 
     void updateStats(S2EExecutionState *state);
+    std::set<klee::ExecutionState *> &MJRGetAllStates (void); // MJR
+    const std::set<klee::ExecutionState *> &MJRGetAllStates (void) const; // MJR
 
     bool isLoadBalancing() const {
         return m_inLoadBalancing;
@@ -220,21 +221,31 @@ public:
     }
 
 protected:
+public: // MJR
+    static void handlerMJRCommon(klee::Executor* executor,
+                                 klee::ExecutionState* state,
+                                 klee::KInstruction* target,
+                                 int accessType,
+                                 std::vector<klee::ref<klee::Expr> > &args);
     static void handlerTraceMemoryAccess(klee::Executor* executor,
-                                    klee::ExecutionState* state,
-                                    klee::KInstruction* target,
-                                    std::vector<klee::ref<klee::Expr> > &args);
+                                         klee::ExecutionState* state,
+                                         klee::KInstruction* target,
+                                         std::vector<klee::ref<klee::Expr> > &args);
+    static void handlerTracePortAccess(klee::Executor* executor,
+                                       klee::ExecutionState* state,
+                                       klee::KInstruction* target,
+                                       std::vector<klee::ref<klee::Expr> > &args);
+    static void handlerTraceDMAAccess(klee::Executor* executor,
+                                      klee::ExecutionState* state,
+                                      klee::KInstruction* target,
+                                      std::vector<klee::ref<klee::Expr> > &args);
+  protected: // MJR moved
 
     //Traces every single LLVM instruction in dyngend code
     static void handlerTraceInstruction(klee::Executor* executor,
                                     klee::ExecutionState* state,
                                     klee::KInstruction* target,
                                     std::vector<klee::ref<klee::Expr> > &args);
-
-    static void handlerTracePortAccess(klee::Executor* executor,
-                                         klee::ExecutionState* state,
-                                         klee::KInstruction* target,
-                                         std::vector<klee::ref<klee::Expr> > &args);
 
     static void handlerOnTlbMiss(klee::Executor* executor,
                                          klee::ExecutionState* state,

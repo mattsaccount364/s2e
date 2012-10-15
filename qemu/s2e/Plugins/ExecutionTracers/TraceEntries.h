@@ -71,10 +71,81 @@ enum ExecTraceEntryType {
     TRACE_PAGEFAULT,
     TRACE_TLBMISS,
     TRACE_ICOUNT,
+    TRACE_HW_ACCESS, // SymDrive
+    TRACE_INSTR, // SymDrive
+    TRACE_BB, // SymDrive
+    TRACE_EVENT, // SymDrive
+    TRACE_SUCCESS, // SymDrive
+    TRACE_IO_REGION, // SymDrive
     TRACE_MEM_CHECKER,
     TRACE_MAX
 };
 
+// SymDrive Added this ---------------->
+enum TRACE_HW_OP {
+    TRACE_HW_PORT = 0,
+    TRACE_HW_IOMEM = 1,
+    TRACE_HW_DMA = 2
+};
+
+enum TRACE_IO_REGION {
+    IO_MAP = 0x1,
+    IO_UNMAP = 0x2,
+    PORT_MAP = 0x3,
+    PORT_UNMAP = 0x4
+};
+
+#define TRACE_HW_OP_NUM_FN 32
+#define TRACE_HW_OP_NID "Not in driver"
+struct ExecutionTraceHWAccess {
+    uint64_t          pc;
+    char              fn_names[TRACE_HW_OP_NUM_FN][32];
+    enum TRACE_HW_OP  op;
+    bool              write; // is it a write?
+    uint64_t          virt_address;
+    uint64_t          phys_address;
+    bool              address_symbolic;
+    uint64_t          value;
+    bool              value_symbolic;
+    uint8_t           size;
+    uint8_t           flags;
+} __attribute__((packed));
+
+struct ExecutionTraceInstr {
+    uint32_t          state_id;
+    uint64_t          pc;
+    uint64_t          delta;
+    char              fn[32];
+} __attribute__((packed));
+
+struct ExecutionTraceBB {
+    uint32_t          state_id;
+    uint64_t          pc;
+    uint64_t          delta;
+    char              fn[32];
+} __attribute__((packed));
+
+struct ExecutionTraceEvent {
+    uint32_t          state_id;
+    uint64_t          pc;
+    uint32_t          event;
+} __attribute__((packed));
+
+struct ExecutionTraceSuccessPath {
+    uint32_t          state_id;
+    uint64_t          pc;
+    uint64_t          success;
+    char              fn[32];
+} __attribute__((packed));
+
+struct ExecutionTraceIORegion {
+    uint32_t             state_id;
+    uint64_t             pc;
+    enum TRACE_IO_REGION flags;
+    uint32_t             address;
+    uint32_t             size;
+} __attribute__((packed));
+// SymDrive <----------------------
 
 struct ExecutionTraceItemHeader{
     uint64_t timeStamp;

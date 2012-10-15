@@ -15,6 +15,7 @@
 #include "klee/Expr.h"
 #include "klee/TimerStatIncrementer.h"
 #include "klee/ExecutionState.h"
+#include "klee/Executor.h"
 
 using namespace klee;
 
@@ -349,6 +350,41 @@ bool AddressSpace::copyInConcretes() {
   }
 
   return true;
+}
+
+//
+// The purpose of this function is to concretize all symbolic
+// data in the current "address space."  The idea is to collapse all
+// the constraints, and just give us concrete data.  Ideally we'd not
+// need this but sometimes constraints get out of hand.
+//
+void AddressSpace::concretizeAll(Executor *e) {
+    unsigned int object_offset;
+    int i, j;
+    i = 0;
+    j = 0;
+    for (MemoryMap::iterator it = objects.begin(),
+             ie = objects.end(); it != ie; ++it) {
+        ObjectState *os = it->second;
+        for (object_offset = 0; object_offset < os->size; object_offset++) {
+            ref<klee::Expr> oldexpr;
+            if (os->knownSymbolics != NULL) {
+                oldexpr = os->knownSymbolics[object_offset];
+            } else {
+                continue;
+            }
+
+            if (oldexpr.get() == NULL) {
+                continue;
+            }
+
+            ref<klee::ConstantExpr> expr = e->toConstantSilent(*state, oldexpr);
+            os->setKnownSymbolic (object_offset, expr.get());
+            j++;
+        }
+        i++;
+    }
+    // std::cerr << "AddressSpace: " << i << ", " << j << std::endl;
 }
 
 /***/

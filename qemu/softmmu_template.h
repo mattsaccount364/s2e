@@ -85,15 +85,21 @@
 #include <s2e/s2e_config.h>
 
 #ifdef S2E_LLVM_LIB
-#define S2E_TRACE_MEMORY(vaddr, haddr, value, isWrite, isIO) \
-    tcg_llvm_trace_memory_access(vaddr, haddr, \
-                                 value, 8*sizeof(value), isWrite, isIO);
+// MJR Changed definition of S2E_TRACE_MEMORY
+//#define S2E_TRACE_MEMORY(vaddr, haddr, value, isWrite, isIO)  \
+//    tcg_llvm_trace_memory_access(vaddr, haddr,                        \
+//                                 value, 8*sizeof(value), isWrite, isIO);
+#define S2E_TRACE_MEMORY(vaddr, value, isWrite) \
+    tcg_llvm_trace_memory_access(vaddr, value, sizeof(value), isWrite);
 #define S2E_FORK_AND_CONCRETIZE(val, max) \
     tcg_llvm_fork_and_concretize(val, 0, max)
 #else // S2E_LLVM_LIB
-#define S2E_TRACE_MEMORY(vaddr, haddr, value, isWrite, isIO) \
-    s2e_trace_memory_access(vaddr, haddr, \
-                            (uint8_t*) &value, sizeof(value), isWrite, isIO);
+// MJR Changed definition of S2E_TRACE_MEMORY
+//#define S2E_TRACE_MEMORY(vaddr, haddr, value, isWrite, isIO)  \
+//    s2e_trace_memory_access(vaddr, haddr,                             \
+//                            (uint8_t*) &value, sizeof(value), isWrite, isIO);
+#define S2E_TRACE_MEMORY(vaddr, value, isWrite) \
+    s2e_trace_memory_access(g_s2e, g_s2e_state, vaddr, (uint8_t*) &value, sizeof(value), isWrite);
 #define S2E_FORK_AND_CONCRETIZE(val, max) (val)
 #endif // S2E_LLVM_LIB
 
@@ -137,7 +143,25 @@ DATA_TYPE glue(glue(io_read, SUFFIX), MMUSUFFIX)(ENV_PARAM
     physaddr = (physaddr & TARGET_PAGE_MASK) + addr;
 
 #ifdef CONFIG_S2E
+/*
+  MJR
     if (glue(s2e_is_mmio_symbolic_, SUFFIX)(physaddr)) {
+        s2e_switch_to_symbolic(g_s2e, g_s2e_state);
+    }
+*/
+    // Only switch to symbolic if we're actually looking at
+    // doing a symbolic I/O memory operation
+    // OR DMA.  The second condition is for DMA, the first is for I/O memory.
+    if (s2e_issymfunc(mr, addr) || glue(s2e_is_mmio_symbolic_, SUFFIX)(physaddr)) {
+        // On this branch, we're accessing symbolic memory
+        // MJR
+        //target_phys_addr_t MJR_physaddr;
+        // This command gives us the address of the base of the page
+        //MJR_physaddr = cpu_cpu_x86_handle_mmu_fget_phys_page_debug(env, addr);
+        // Add the offset.
+        //MJR_physaddr += addr & (~TARGET_PAGE_MASK);
+        //if (glue(s2e_is_mmio_symbolic_, SUFFIX)(MJR_physaddr)) { // MJR
+        //If at least one byte is symbolic, generate a label
         s2e_switch_to_symbolic(g_s2e, g_s2e_state);
     }
 #endif
@@ -165,6 +189,7 @@ DATA_TYPE glue(glue(io_read, SUFFIX), MMUSUFFIX)(ENV_PARAM
     return res;
 }
 
+// MJR: this function executes natively:
 inline DATA_TYPE glue(glue(io_read_chk, SUFFIX), MMUSUFFIX)(ENV_PARAM target_phys_addr_t physaddr,
                                           target_ulong addr,
                                           void *retaddr)
@@ -175,99 +200,135 @@ inline DATA_TYPE glue(glue(io_read_chk, SUFFIX), MMUSUFFIX)(ENV_PARAM target_phy
 
 #elif defined(S2E_LLVM_LIB) //S2E_LLVM_LIB
 
-inline DATA_TYPE glue(io_make_symbolic, SUFFIX)(const char *name) {
-    uint8_t ret;
-    klee_make_symbolic(&ret, sizeof(ret), name);
-    return ret;
-}
 
 
-inline DATA_TYPE glue(io_read_chk_symb_, SUFFIX)(const char *label, target_ulong physaddr, uintptr_t pa)
-{
-    union {
-        DATA_TYPE dt;
-        uint8_t arr[1<<SHIFT];
-    }data;
-    unsigned i;
+/* // MJR: this function executes symbolically */
+/* inline DATA_TYPE glue(io_make_symbolic, SUFFIX)(const char *name) { */
+/*     uint8_t ret; */
+/*     klee_make_symbolic(&ret, sizeof(ret), name); */
+/*     return ret; */
+/* } */
 
-    data.dt = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa));
 
-    for (i = 0; i<(1<<SHIFT); ++i) {
-        if (s2e_is_mmio_symbolic_b(physaddr + i)) {
-            data.arr[i] = glue(io_make_symbolic, SUFFIX)(label);
-        }
-    }
-    return data.dt;
-}
+/* // MJR: this function executes symbolically */
+/* // MJR assumes physaddr is actually the physical address */
+/* inline DATA_TYPE glue(io_read_chk_symb_, SUFFIX)(const char *label, target_ulong addr, // MJR added addr */
+/*                                                  target_ulong physaddr, uintptr_t pa) */
+/* { */
+/*     union { */
+/*         DATA_TYPE dt; */
+/*         uint8_t arr[1<<SHIFT]; */
+/*     }data; */
+/*     unsigned i; */
 
-inline DATA_TYPE glue(glue(io_read_chk, SUFFIX), MMUSUFFIX)(ENV_PARAM target_phys_addr_t physaddr,
-                                          target_ulong addr,
-                                          void *retaddr)
-{
-    DATA_TYPE res;
-    target_phys_addr_t origaddr = physaddr;
-    MemoryRegion *mr = iotlb_to_region(physaddr);
+/*     data.dt = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa)); */
 
-    target_ulong naddr = (physaddr & TARGET_PAGE_MASK)+addr;
-    char label[64];
-    int isSymb = 0;
-    if ((isSymb = glue(s2e_is_mmio_symbolic_, SUFFIX)(naddr))) {
-        //If at least one byte is symbolic, generate a label
-        trace_port(label, "iommuread_", naddr, env->eip);
-    }
+/*     // MJR assume all this memory is symbolic */
+/*     for (i = 0; i<(1<<SHIFT); ++i) { */
+/*         // if (s2e_is_mmio_symbolic_b(physaddr + i)) { // MJR */
+/*         data.arr[i] = glue(io_make_symbolic, SUFFIX)(label); */
+/*         // } */
+/*     } */
 
-    //If it is not DMA, then check if it is normal memory
-    env->mem_io_pc = (uintptr_t)retaddr;
-    if (mr != &io_mem_ram && mr != &io_mem_rom
-        && mr != &io_mem_unassigned
-        && mr != &io_mem_notdirty
-            && !can_do_io(env)) {
-        cpu_io_recompile(env, retaddr);
-    }
+/*     // MJR added this but it does not work in S2E1.2: */
+/*     { */
+/*         unsigned int isWrite = 0; */
+/*         S2E_TRACE_MEMORY(addr, data.dt, isWrite); */
+/*     } */
 
-    env->mem_io_vaddr = addr;
-#if SHIFT <= 2
-    if (s2e_ismemfunc(mr, 0)) {
-        uintptr_t pa = s2e_notdirty_mem_write(physaddr);
-        if (isSymb) {
-            return glue(io_read_chk_symb_, SUFFIX)(ENV_VAR label, naddr, (uintptr_t)(pa));
-        }
-        res = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa));
-        return res;
-    }
-#else
-#ifdef TARGET_WORDS_BIGENDIAN
-    if (s2e_ismemfunc(mr, 0)) {
-        uintptr_t pa = s2e_notdirty_mem_write(physaddr);
+/*     return data.dt; */
+/* } */
 
-        if (isSymb) {
-            res = glue(io_read_chk_symb_, SUFFIX)(label, naddr, (uintptr_t)(pa)) << 32;
-            res |= glue(io_read_chk_symb_, SUFFIX)(label, naddr,(uintptr_t)(pa+4));
-        }else {
-            res = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa)) << 32;
-            res |= glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa+4));
-        }
+/* // MJR: this function executes symbolically */
+/* inline DATA_TYPE glue(glue(io_read_chk, SUFFIX), MMUSUFFIX)(ENV_PARAM target_phys_addr_t physaddr, */
+/*                                           target_ulong addr, */
+/*                                           void *retaddr) */
+/* { */
+/*     DATA_TYPE res; */
+/*     target_phys_addr_t origaddr = physaddr; */
+/*     MemoryRegion *mr = iotlb_to_region(physaddr); */
 
-        return res;
-    }
-#else
-    if (s2e_ismemfunc(mr, 0)) {
-        uintptr_t pa = s2e_notdirty_mem_write(physaddr);
-        if (isSymb) {
-            res = glue(io_read_chk_symb_, SUFFIX)(label, naddr, (uintptr_t)(pa));
-            res |= glue(io_read_chk_symb_, SUFFIX)(label, naddr, (uintptr_t)(pa+4)) << 32;
-        }else {
-            res = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa));
-            res |= glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa + 4)) << 32;
-        }
-        return res;
-    }
-#endif
-#endif /* SHIFT > 2 */
+/*     target_ulong naddr = (physaddr & TARGET_PAGE_MASK)+addr; */
+/*     char label[64]; */
+/*     int isSymb = 0; */
 
-    //By default, call the original io_read function, which is external
-    return glue(glue(io_read, SUFFIX), MMUSUFFIX)(ENV_VAR origaddr, addr, retaddr);
-}
+/*     // MJR added this block: */
+/*     if (s2e_issymfunc(mr, addr)) */
+/*     { */
+/*         // This command gives us the address of the base of the page */
+/*         //MJR_physaddr = cpu_get_phys_page_debug(env, addr); */
+/*         // Add the offset. */
+/*         //MJR_physaddr += addr & (~TARGET_PAGE_MASK); */
+/*         isSymb = 1; */
+/*         //isSymb = glue(s2e_is_mmio_symbolic_, SUFFIX)(MJR_physaddr); */
+/*         //if (isSymb) { // MJR */
+/*         //If at least one byte is symbolic, generate a label */
+/*         // trace_port(label, "iommuread_", MJR_physaddr, env->eip); */
+/*         // trace_port(label, "iommuread_", physaddr, env->eip); // S2E 1.1 */
+/*         trace_port(label, "iommuread_", naddr, env->eip); // S2E 1.2 */
+/*     } */
+
+/* /\* */
+/*   MJR */
+/*     if ((isSymb = glue(s2e_is_mmio_symbolic_, SUFFIX)(naddr))) { */
+/*         //If at least one byte is symbolic, generate a label */
+/*         trace_port(label, "iommuread_", naddr, env->eip); */
+/*     } */
+/* *\/ */
+
+/*     //If it is not DMA, then check if it is normal memory */
+/*     env->mem_io_pc = (uintptr_t)retaddr; */
+/*     if (mr != &io_mem_ram && mr != &io_mem_rom */
+/*         && mr != &io_mem_unassigned */
+/*         && mr != &io_mem_notdirty */
+/*             && !can_do_io(env)) { */
+/*         cpu_io_recompile(env, retaddr); */
+/*     } */
+
+/*     env->mem_io_vaddr = addr; */
+/* #if SHIFT <= 2 */
+/* //    if (s2e_ismemfunc(mr, 0)) { // MJR */
+/*     uintptr_t pa = s2e_notdirty_mem_write(physaddr); // MJR */
+/*     if (isSymb) { // MJR */
+/*         return glue(io_read_chk_symb_, SUFFIX)(ENV_VAR label, addr, naddr, (uintptr_t)(pa)); */
+/*     } */
+/*     res = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa)); */
+/*     return res; */
+/* #else */
+/* #ifdef TARGET_WORDS_BIGENDIAN */
+/* //    if (s2e_ismemfunc(mr, 0)) { // MJR */
+/*     if (isSymb) { // MJR */
+/*         uintptr_t pa = s2e_notdirty_mem_write(physaddr); */
+
+/*         if (isSymb) { */
+/*             res = glue(io_read_chk_symb_, SUFFIX)(label, addr, naddr, (uintptr_t)(pa)) << 32; */
+/*             res |= glue(io_read_chk_symb_, SUFFIX)(label, addr, naddr,(uintptr_t)(pa+4)); */
+/*         }else { */
+/*             res = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa)) << 32; */
+/*             res |= glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa+4)); */
+/*         } */
+
+/*         return res; */
+/*     } */
+/* #else */
+/* //    if (s2e_ismemfunc(mr, 0)) { // MJR */
+/*     if (isSymb) { // MJR */
+/*         uintptr_t pa = s2e_notdirty_mem_write(physaddr); */
+/*         if (isSymb) { */
+/*             res = glue(io_read_chk_symb_, SUFFIX)(label, addr, naddr, (uintptr_t)(pa)); */
+/*             res |= glue(io_read_chk_symb_, SUFFIX)(label, addr, naddr, (uintptr_t)(pa+4)) << 32; */
+/*         }else { */
+/*             res = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa)); */
+/*             res |= glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(pa + 4)) << 32; */
+/*         } */
+/*         return res; */
+/*     } */
+/* #endif */
+/* #endif /\* SHIFT > 2 *\/ */
+
+/*     //By default, call the original io_read function, which is external */
+/*     return glue(glue(io_read, SUFFIX), MMUSUFFIX)(ENV_VAR origaddr, addr, retaddr); */
+/* } */
 
 
 #endif
@@ -303,7 +364,7 @@ glue(glue(glue(HELPER_PREFIX, ld), SUFFIX), MMUSUFFIX)(ENV_PARAM
             ioaddr = env->iotlb[mmu_idx][index];
             res = glue(glue(io_read_chk, SUFFIX), MMUSUFFIX)(ENV_VAR ioaddr, addr, retaddr);
 
-            S2E_TRACE_MEMORY(addr, addr+ioaddr, res, 0, 1);
+            // S2E_TRACE_MEMORY(addr, addr+ioaddr, res, 0, 1); // MJR
 
         } else if (unlikely(((addr & ~S2E_RAM_OBJECT_MASK) + DATA_SIZE - 1) >= S2E_RAM_OBJECT_SIZE)) {
             /* slow unaligned access (it spans two pages or IO) */
@@ -336,7 +397,7 @@ glue(glue(glue(HELPER_PREFIX, ld), SUFFIX), MMUSUFFIX)(ENV_PARAM
 #endif
                 res = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(addr+addend));
 
-            S2E_TRACE_MEMORY(addr, addr+addend, res, 0, 0);
+            // S2E_TRACE_MEMORY(addr, addr+addend, res, 0, 0); // MJR
         }
     } else {
         /* the page is not in the TLB : fill it */
@@ -381,7 +442,7 @@ glue(glue(slow_ld, SUFFIX), MMUSUFFIX)(ENV_PARAM
             ioaddr = env->iotlb[mmu_idx][index];
             res = glue(glue(io_read_chk, SUFFIX), MMUSUFFIX)(ENV_VAR ioaddr, addr, retaddr);
 
-            S2E_TRACE_MEMORY(addr, addr+ioaddr, res, 0, 1);
+            // S2E_TRACE_MEMORY(addr, addr+ioaddr, res, 0, 1); // MJR
         } else if (((addr & ~S2E_RAM_OBJECT_MASK) + DATA_SIZE - 1) >= S2E_RAM_OBJECT_SIZE) {
 
         do_unaligned_access:
@@ -411,7 +472,7 @@ glue(glue(slow_ld, SUFFIX), MMUSUFFIX)(ENV_PARAM
 #endif
                 res = glue(glue(ld, USUFFIX), _raw)((uint8_t *)(intptr_t)(addr+addend));
 
-            S2E_TRACE_MEMORY(addr, addr+addend, res, 0, 0);
+            // S2E_TRACE_MEMORY(addr, addr+addend, res, 0, 0); // MJR
         }
     } else {
         /* the page is not in the TLB : fill it */
@@ -439,7 +500,7 @@ void glue(glue(io_write, SUFFIX), MMUSUFFIX)(
                                           void *retaddr);
 #ifndef S2E_LLVM_LIB
 
-
+// MJR This function executes natively:
 void glue(glue(io_write, SUFFIX), MMUSUFFIX)(ENV_PARAM
                                              target_phys_addr_t physaddr,
                                           DATA_TYPE val,
@@ -447,6 +508,26 @@ void glue(glue(io_write, SUFFIX), MMUSUFFIX)(ENV_PARAM
                                           void *retaddr)
 {
     MemoryRegion *mr = iotlb_to_region(physaddr);
+
+#ifdef CONFIG_S2E
+    // Only switch to symbolic if we're actually looking at
+    // doing a symbolic I/O memory operation.  Second condition is for DMA.
+    // This code should not run in symbolic mode
+    if (s2e_issymfunc(mr, addr) || glue(s2e_is_mmio_symbolic_, SUFFIX)(physaddr)) {
+        // On this branch, we're accessing symbolic memory
+        // MJR
+        //target_phys_addr_t MJR_physaddr;
+        // This command gives us the address of the base of the page
+        //MJR_physaddr = cpu_cpu_x86_handle_mmu_fget_phys_page_debug(env, addr);
+        // Add the offset.
+        //MJR_physaddr += addr & (~TARGET_PAGE_MASK);
+        //if (glue(s2e_is_mmio_symbolic_, SUFFIX)(MJR_physaddr)) { // MJR
+        //If at least one byte is symbolic, generate a label
+        if (g_tracing_enabled) {
+            s2e_switch_to_symbolic(g_s2e, g_s2e_state);
+        }
+    }
+#endif
 
     physaddr = (physaddr & TARGET_PAGE_MASK) + addr;
     if (mr != &io_mem_ram && mr != &io_mem_rom
@@ -483,6 +564,7 @@ inline void glue(glue(io_write_chk, SUFFIX), MMUSUFFIX)(ENV_PARAM target_phys_ad
 #else
 
 
+// MJR: this function executes symbolically
 /**
   * Only if compiling for LLVM.
   * This function checks whether a write goes to a clean memory page.
@@ -491,64 +573,77 @@ inline void glue(glue(io_write_chk, SUFFIX), MMUSUFFIX)(ENV_PARAM target_phys_ad
   *
   * It also deals with writes to memory-mapped devices that are symbolic
   */
-inline void glue(glue(io_write_chk, SUFFIX), MMUSUFFIX)(ENV_PARAM target_phys_addr_t physaddr,
-                                          DATA_TYPE val,
-                                          target_ulong addr,
-                                          void *retaddr)
-{
-    target_phys_addr_t origaddr = physaddr;
-    MemoryRegion *mr = iotlb_to_region(physaddr);
 
-    physaddr = (physaddr & TARGET_PAGE_MASK) + addr;
-    if (mr != &io_mem_ram && mr != &io_mem_rom
-        && mr != &io_mem_unassigned
-        && mr != &io_mem_notdirty
-            && !can_do_io(env)) {
-        cpu_io_recompile(env, retaddr);
-    }
+/* inline void glue(glue(io_write_chk, SUFFIX), MMUSUFFIX)(ENV_PARAM target_phys_addr_t physaddr, */
+/*                                           DATA_TYPE val, */
+/*                                           target_ulong addr, */
+/*                                           void *retaddr) */
+/* { */
+/*     target_phys_addr_t origaddr = physaddr; */
+/*     MemoryRegion *mr = iotlb_to_region(physaddr); */
+/*     int isSymb = 0; // MJR */
+
+/*     physaddr = (physaddr & TARGET_PAGE_MASK) + addr; */
+/*     if (mr != &io_mem_ram && mr != &io_mem_rom */
+/*         && mr != &io_mem_unassigned */
+/*         && mr != &io_mem_notdirty */
+/*             && !can_do_io(env)) { */
+/*         cpu_io_recompile(env, retaddr); */
+/*     } */
 
 
-    env->mem_io_vaddr = addr;
-    env->mem_io_pc = (uintptr_t)retaddr;
-#if SHIFT <= 2
-    if (s2e_ismemfunc(mr, 1)) {
-        uintptr_t pa = s2e_notdirty_mem_write(physaddr);
-        glue(glue(st, SUFFIX), _raw)((uint8_t *)(intptr_t)(pa), val);
-        return;
-    }
-#else
-#ifdef TARGET_WORDS_BIGENDIAN
-    if (s2e_ismemfunc(s2e_ismemfunc(mr, 1)) {
-        uintptr_t pa = s2e_notdirty_mem_write(physaddr);
-        stl_raw((uint8_t *)(intptr_t)(pa), val>>32);
-        stl_raw((uint8_t *)(intptr_t)(pa+4), val);
-        return;
-    }
-#else
-    if (s2e_ismemfunc(mr, 1)) {
-        uintptr_t pa = s2e_notdirty_mem_write(physaddr);
-        stl_raw((uint8_t *)(intptr_t)(pa), val);
-        stl_raw((uint8_t *)(intptr_t)(pa+4), val>>32);
-        return;
-    }
-#endif
-#endif /* SHIFT > 2 */
+/*     env->mem_io_vaddr = addr; */
+/*     env->mem_io_pc = (uintptr_t)retaddr; */
 
-    //XXX: Check if MMIO is symbolic, and add corresponding trace entry
+/*     // MJR - added this block: */
+/*     if (s2e_issymfunc(mr, addr)) { */
+/*         unsigned int isWrite = 1; */
+/*         S2E_TRACE_MEMORY(addr, val, isWrite); */
+/*         isSymb = 1; */
+/*     } */
 
-    //Since we do not handle symbolic devices for now, we offer the
-    //option of concretizing the arguments to I/O helpers.
-    if (g_s2e_concretize_io_writes) {
-        val = klee_get_value(val);
-    }
+/* #if SHIFT <= 2 */
+/*     // if (s2e_ismemfunc(mr, 1)) { // MJR */
+/*     if (isSymb) { // MJR */
+/*         uintptr_t pa = s2e_notdirty_mem_write(physaddr); */
+/*         glue(glue(st, SUFFIX), _raw)((uint8_t *)(intptr_t)(pa), val); */
+/*         return; */
+/*     } */
+/* #else */
+/* #ifdef TARGET_WORDS_BIGENDIAN */
+/*     // if (s2e_ismemfunc(s2e_ismemfunc(mr, 1)) { // MJR */
+/*     if (isSymb) { // MJR */
+/*         uintptr_t pa = s2e_notdirty_mem_write(physaddr); */
+/*         stl_raw((uint8_t *)(intptr_t)(pa), val>>32); */
+/*         stl_raw((uint8_t *)(intptr_t)(pa+4), val); */
+/*         return; */
+/*     } */
+/* #else */
+/*     // if (s2e_ismemfunc(mr, 1)) { // MJR */
+/*     if (isSymb) { // MJR */
+/*         uintptr_t pa = s2e_notdirty_mem_write(physaddr); */
+/*         stl_raw((uint8_t *)(intptr_t)(pa), val); */
+/*         stl_raw((uint8_t *)(intptr_t)(pa+4), val>>32); */
+/*         return; */
+/*     } */
+/* #endif */
+/* #endif /\* SHIFT > 2 *\/ */
 
-    if (g_s2e_concretize_io_addresses) {
-        addr = klee_get_value(addr);
-    }
+/*     //XXX: Check if MMIO is symbolic, and add corresponding trace entry */
 
-    //By default, call the original io_write function, which is external
-    glue(glue(io_write, SUFFIX), MMUSUFFIX)(ENV_VAR origaddr, val, addr, retaddr);
-}
+/*     //Since we do not handle symbolic devices for now, we offer the */
+/*     //option of concretizing the arguments to I/O helpers. */
+/*     if (g_s2e_concretize_io_writes) { */
+/*         val = klee_get_value(val); */
+/*     } */
+
+/*     if (g_s2e_concretize_io_addresses) { */
+/*         addr = klee_get_value(addr); */
+/*     } */
+
+/*     //By default, call the original io_write function, which is external */
+/*     glue(glue(io_write, SUFFIX), MMUSUFFIX)(ENV_VAR origaddr, val, addr, retaddr); */
+/* } */
 
 #endif
 
@@ -580,7 +675,7 @@ void glue(glue(glue(HELPER_PREFIX, st), SUFFIX), MMUSUFFIX)(ENV_PARAM
             ioaddr = env->iotlb[mmu_idx][index];
             glue(glue(io_write_chk, SUFFIX), MMUSUFFIX)(ENV_VAR ioaddr, val, addr, retaddr);
 
-            S2E_TRACE_MEMORY(addr, addr+ioaddr, val, 1, 1);
+            // S2E_TRACE_MEMORY(addr, addr+ioaddr, val, 1, 1); // MJR
         } else if (unlikely(((addr & ~S2E_RAM_OBJECT_MASK) + DATA_SIZE - 1) >= S2E_RAM_OBJECT_SIZE)) {
 
         do_unaligned_access:
@@ -604,6 +699,8 @@ void glue(glue(glue(HELPER_PREFIX, st), SUFFIX), MMUSUFFIX)(ENV_PARAM
 #endif
             addend = env->tlb_table[mmu_idx][index].addend;
 #if defined(CONFIG_S2E) && defined(S2E_ENABLE_S2E_TLB) && !defined(S2E_LLVM_LIB)
+            // MJR DMA write recording would take place here or in this immediate vicinity if we wanted it.
+            // DMA writes are not the same as I/O memory writes.
             S2ETLBEntry *e = &env->s2e_tlb_table[mmu_idx][object_index & (CPU_S2E_TLB_SIZE-1)];
             if(likely((e->addend & 1) && _s2e_check_concrete(e->objectState, addr & ~S2E_RAM_OBJECT_MASK, DATA_SIZE)))
                 glue(glue(st, SUFFIX), _p)((uint8_t*)(addr + (e->addend&~1)), val);
@@ -611,7 +708,7 @@ void glue(glue(glue(HELPER_PREFIX, st), SUFFIX), MMUSUFFIX)(ENV_PARAM
 #endif
                 glue(glue(st, SUFFIX), _raw)((uint8_t *)(intptr_t)(addr+addend), val);
 
-            S2E_TRACE_MEMORY(addr, addr+addend, val, 1, 0);
+            // S2E_TRACE_MEMORY(addr, addr+addend, val, 1, 0); // MJR
         }
     } else {
         /* the page is not in the TLB : fill it */
@@ -653,7 +750,7 @@ static void glue(glue(slow_st, SUFFIX), MMUSUFFIX)(ENV_PARAM
             ioaddr = env->iotlb[mmu_idx][index];
             glue(glue(io_write_chk, SUFFIX), MMUSUFFIX)(ENV_VAR ioaddr, val, addr, retaddr);
 
-            S2E_TRACE_MEMORY(addr, addr+ioaddr, val, 1, 1);
+            // S2E_TRACE_MEMORY(addr, addr+ioaddr, val, 1, 1); // MJR
         } else if (((addr & ~S2E_RAM_OBJECT_MASK) + DATA_SIZE - 1) >= S2E_RAM_OBJECT_SIZE) {
 
         do_unaligned_access:
@@ -683,7 +780,7 @@ static void glue(glue(slow_st, SUFFIX), MMUSUFFIX)(ENV_PARAM
 #endif
                 glue(glue(st, SUFFIX), _raw)((uint8_t *)(intptr_t)(addr+addend), val);
 
-            S2E_TRACE_MEMORY(addr, addr+addend, val, 1, 0);
+            // S2E_TRACE_MEMORY(addr, addr+addend, val, 1, 0); // MJR
         }
     } else {
         /* the page is not in the TLB : fill it */

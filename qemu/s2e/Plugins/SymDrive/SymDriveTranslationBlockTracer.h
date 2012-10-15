@@ -34,88 +34,70 @@
  *
  */
 
-#ifndef _RAWMONITOR_PLUGIN_H_
-
-#define _RAWMONITOR_PLUGIN_H_
-
-#include <s2e/Plugins/ModuleDescriptor.h>
+#ifndef S2E_PLUGINS_SYMDRIVETBTRACER_H
+#define S2E_PLUGINS_SYMDRIVETBTRACER_H
 
 #include <s2e/Plugin.h>
 #include <s2e/Plugins/CorePlugin.h>
-#include <s2e/Plugins/OSMonitor.h>
+#include <s2e/S2EExecutionState.h>
 
-#include <vector>
+#include "../ExecutionTracers/ExecutionTracer.h"
+#include "../ExecutionTracers/TraceEntries.h"
+#include <s2e/Plugins/ModuleExecutionDetector.h>
 
 namespace s2e {
 namespace plugins {
 
-class RawMonitor:public OSMonitor
+class SymDriveTranslationBlockTracer : public Plugin
 {
     S2E_PLUGIN
-
 public:
-    struct Cfg {
-        std::string name;
-        uint64_t start;
-        uint64_t size;
-        uint64_t nativebase;
-        uint64_t entrypoint;
-        bool delayLoad;
-        bool kernelMode;
-        bool primaryModule; // SymDrive
-    };
+    SymDriveTranslationBlockTracer(S2E* s2e): Plugin(s2e) {}
 
-    struct OpcodeModuleConfig {
-        uint32_t name;
-        uint64_t nativeBase;
-        uint64_t loadBase;
-        uint64_t entryPoint;
-        uint64_t size;
-        uint32_t kernelMode;
-        uint32_t primaryModule; // SymDrive
-    } __attribute__((packed));
+    void initialize(void);
 
-    typedef std::vector<Cfg> CfgList;
+
 private:
-    CfgList m_cfg;
-    sigc::connection m_onTranslateInstruction;
+    ExecutionTracer *m_tracer;
+    ModuleExecutionDetector *m_detector;
 
-    uint64_t m_kernelStart;
+    void onModuleTranslateBlockStart(
+            ExecutionSignal *signal,
+            S2EExecutionState* state,
+            const ModuleDescriptor &module,
+            TranslationBlock *tb,
+            uint64_t pc);
 
-    Imports m_imports;
+    void onModuleTranslateBlockEnd(
+            ExecutionSignal *signal,
+            S2EExecutionState* state,
+            const ModuleDescriptor &module,
+            TranslationBlock *tb,
+            uint64_t endPc,
+            bool staticTarget,
+            uint64_t targetPc);
 
-    bool initSection(const std::string &cfgKey, const std::string &svcId);
-    void onCustomInstruction(S2EExecutionState* state, uint64_t opcode);
-    void loadModule(S2EExecutionState *state, const Cfg &c, bool delay);
+    void onTranslateBlockStart(
+            ExecutionSignal *signal,
+            S2EExecutionState* state,
+            TranslationBlock *tb,
+            uint64_t pc);
 
-    void opLoadConfiguredModule(S2EExecutionState *state);
-    void opCreateImportDescriptor(S2EExecutionState *state);
-    void opLoadModule(S2EExecutionState *state);
+    void onTranslateBlockEnd(
+            ExecutionSignal *signal,
+            S2EExecutionState* state,
+            TranslationBlock *tb,
+            uint64_t endPc,
+            bool staticTarget,
+            uint64_t targetPc);
 
-public:
-    RawMonitor(S2E* s2e): OSMonitor(s2e) {}
-    virtual ~RawMonitor();
-    void initialize();
+    void trace(S2EExecutionState *state, uint64_t pc, ExecTraceEntryType type);
 
-    void onTranslateInstructionStart(ExecutionSignal *signal,
-                                     S2EExecutionState *state,
-                                     TranslationBlock *tb,
-                                     uint64_t pc);
-
-    virtual bool getImports(S2EExecutionState *s, const ModuleDescriptor &desc, Imports &I);
-    virtual bool getExports(S2EExecutionState *s, const ModuleDescriptor &desc, Exports &E);
-    virtual bool isKernelAddress(uint64_t pc) const;
-    virtual uint64_t getPid(S2EExecutionState *s, uint64_t pc);
-
-    virtual bool getCurrentStack(S2EExecutionState *state, uint64_t *base, uint64_t *size) {
-        return false;
-    }
+    void onExecuteBlockStart(S2EExecutionState *state, uint64_t pc);
+    void onExecuteBlockEnd(S2EExecutionState *state, uint64_t pc);
 };
-
-
 
 } // namespace plugins
 } // namespace s2e
-
 
 #endif

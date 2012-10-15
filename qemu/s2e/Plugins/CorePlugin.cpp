@@ -328,6 +328,7 @@ void s2e_init_timers(S2E* s2e)
     s2e->getCorePlugin()->initializeTimers();
 }
 
+#if 0 // SymDrive
 static void s2e_trace_memory_access_slow(
         uint64_t vaddr, uint64_t haddr, uint8_t* buf, unsigned size,
         int isWrite, int isIO)
@@ -356,6 +357,56 @@ void s2e_trace_memory_access(
 {
     if(unlikely(!g_s2e->getCorePlugin()->onDataMemoryAccess.empty())) {
         s2e_trace_memory_access_slow(vaddr, haddr, buf, size, isWrite, isIO);
+    }
+}
+#endif
+
+void s2e_trace_memory_access(
+    struct S2E *s2e, struct S2EExecutionState* state,
+    uint64_t vaddr, uint8_t* buf, unsigned size, int isWrite)
+{
+/* // SymDrive
+   if(!s2e->getCorePlugin()->onDataMemoryAccess.empty()) {
+   uint64_t value = 0;
+   memcpy((void*) &value, buf, size);
+
+   try {
+   s2e->getCorePlugin()->onDataMemoryAccess.emit(state,
+   klee::ConstantExpr::create(vaddr, 64),
+   klee::ConstantExpr::create(haddr, 64),
+   klee::ConstantExpr::create(value, size*8),
+   isWrite, isIO != 0 ? true : false); // SymDrive tweaked
+   } catch(s2e::CpuExitException&) {
+   longjmp(env->jmp_env, 1);
+   }
+   }
+*/
+
+    // SymDrive, added this:
+    if(/* isIO == 2 && */!g_s2e->getCorePlugin()->onIOMemoryAccess.empty()) {
+
+        try {
+            // Parameters to onIOMemoryAccess.
+            // Address:
+            klee::ref<klee::Expr> eAddress = klee::ConstantExpr::create(vaddr, 64);
+
+            // Data / size:
+            uint64_t value = 0;
+            memcpy((void*) &value, buf, size);
+            klee::ref<klee::Expr> eValue = klee::ConstantExpr::create(value, size*8);
+            int accessType = 1; // MMIO
+            g_s2e->getCorePlugin()->onIOMemoryAccess.emit(
+                state,
+                accessType,
+                eAddress,
+                eValue,
+                size,
+                isWrite);
+            g_s2e->getMessagesStream() << "s2e_trace_memory_access: Finished I/O memory access\n";
+        } catch(s2e::CpuExitException&) {
+            g_s2e->getMessagesStream() << "s2e_trace_memory_access: Caught CPUExitException\n";
+            s2e_longjmp(env->jmp_env, 1);
+        }
     }
 }
 
@@ -393,6 +444,7 @@ void s2e_trace_port_access(
         uint64_t port, uint64_t value, unsigned size,
         int isWrite)
 {
+/* SymDrive commented
     if(!s2e->getCorePlugin()->onPortAccess.empty()) {
         try {
             s2e->getCorePlugin()->onPortAccess.emit(state,
@@ -400,6 +452,29 @@ void s2e_trace_port_access(
                 klee::ConstantExpr::create(value, size),
                 isWrite);
         } catch(s2e::CpuExitException&) {
+            s2e_longjmp(env->jmp_env, 1);
+        }
+    }
+*/
+    // SymDrive added this:
+    if(!s2e->getCorePlugin()->onIOMemoryAccess.empty()) {
+        try {
+            // We're ignoring host addr
+            // Parameters to onIOMemoryAccess:
+            int accessType = 0; // Port I/O
+            klee::ref<klee::Expr> eAddress = klee::ConstantExpr::create(port, 64);
+            klee::ref<klee::Expr> eValue = klee::ConstantExpr::create(value, 64);
+
+            s2e->getCorePlugin()->onIOMemoryAccess.emit(
+                state,
+                accessType,
+                eAddress, // vaddr
+                eValue,   // value
+                size,     // size in bytes
+                isWrite); // isWrite
+            s2e->getMessagesStream() << "s2e_trace_port_access: Finished port access\n";
+        } catch(s2e::CpuExitException&) {
+            s2e->getMessagesStream() << "s2e_trace_port_access: Caught CPUExitException\n";
             s2e_longjmp(env->jmp_env, 1);
         }
     }
@@ -482,3 +557,45 @@ void s2e_on_monitor_event(QDict *event)
     g_s2e->getCorePlugin()->onMonitorEvent.emit(event, pluginData);
     qdict_put(event, "s2e-event", pluginData);
 }
+
+// SymDrive added this chunk / copied from llvm-lib.h (with tweaks)
+static char SymDrive_hextable[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+                          'c', 'd', 'e', 'f'};
+static inline void SymDrive_uint32_to_string(uint32_t n, char *str)
+{
+    str[0] = SymDrive_hextable[(n >> 28)];
+    str[1] = SymDrive_hextable[((n >> 24) & 0xF)];
+    str[2] = SymDrive_hextable[((n >> 20) & 0xF)];
+    str[3] = SymDrive_hextable[((n >> 16) & 0xF)];
+    str[4] = SymDrive_hextable[((n >> 12) & 0xF)];
+    str[5] = SymDrive_hextable[((n >> 8) & 0xF)];
+    str[6] = SymDrive_hextable[((n >> 4) & 0xF)];
+    str[7] = SymDrive_hextable[((n >> 0) & 0xF)];
+    str[8] = 0;
+}
+
+// SymDrive added this ---------->
+void s2e_establishIOMap(int prefix, uint32_t port, uint32_t pc, uint32_t unique_id)
+{
+    std::stringstream label;
+    if (prefix == 1) {
+        label << "inb";
+    } else if (prefix == 2) {
+        label << "inw";
+    } else  if (prefix == 3) {
+        label << "inl";
+    } else {
+        assert (false && "Specify a valid prefix");
+    }
+
+    // Make the formatting identical to the one outline in op_helper.c
+    char str[9];
+    SymDrive_uint32_to_string(port, str);
+    label << str << "_";
+    SymDrive_uint32_to_string(pc, str);
+    label << str << "_";
+    SymDrive_uint32_to_string(unique_id, str);
+    label << str;
+    g_s2e->getCorePlugin()->establishIOMap(label.str());
+}
+/////////////////// <---------- SymDrive

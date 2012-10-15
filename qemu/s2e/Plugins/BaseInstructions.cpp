@@ -169,6 +169,51 @@ void BaseInstructions::isSymbolic(S2EExecutionState *state)
 
 void BaseInstructions::killState(S2EExecutionState *state)
 {
+    // SymDrive implementation
+    std::string message;
+    uint32_t messagePtr;
+    bool ok = true;
+    klee::ref<klee::Expr> kill_all = state->readCpuRegister(CPU_OFFSET(regs[R_EAX]), klee::Expr::Int32);
+    klee::ref<klee::Expr> status = state->readCpuRegister(CPU_OFFSET(regs[R_EBX]), klee::Expr::Int32);
+    ok &= state->readCpuRegisterConcrete(CPU_OFFSET(regs[R_ECX]), &messagePtr, 4);
+
+    if (!ok) {
+        s2e()->getWarningsStream(state)
+            << "ERROR: symbolic argument was passed to s2e_op kill state\n";
+    } else {
+        message="<NO MESSAGE>";
+        if(!messagePtr || !state->readString(messagePtr, message)) {
+            s2e()->getWarningsStream(state)
+                << "s2e_kill_state:  error reading message string from the guest\n";
+        }
+    }
+
+    bool isKillAllCste = isa<klee::ConstantExpr>(kill_all);
+    int i_kill_all = isKillAllCste ? cast<klee::ConstantExpr>(kill_all)->getZExtValue(64) : 0;
+    if (i_kill_all == 0) {
+        if (s2e()->getExecutor()->getStatesCount() == 1) {
+            s2e()->getWarningsStream(state) << "Not killing state " << state->getID()
+                                            << " since it's the only one!\n";
+            s2e()->getWarningsStream(state) << "Message from guest: \"" << message << "\"\n"
+                                            << "status: " << status << "\n";
+            return;
+        }
+    }
+
+    //Kill the current state                                                                                
+    s2e()->getWarningsStream(state) << "Killing state "  << state->getID() << "\n";
+    std::ostringstream os;
+    os << "State was terminated by opcode\n"
+       << "            message: \"" << message << "\"\n"
+       << "            status: " << status << "\n";
+    s2e()->getWarningsStream(state) << "Message: " << os;
+    s2e()->getExecutor()->terminateStateEarly(*state, os.str());
+    return;
+}
+
+// SymDrive: original implementation
+/*
+{
     std::string message;
     uint32_t messagePtr;
     bool ok = true;
@@ -194,6 +239,7 @@ void BaseInstructions::killState(S2EExecutionState *state)
        << "            status: " << status;
     s2e()->getExecutor()->terminateStateEarly(*state, os.str());
 }
+*/
 
 void BaseInstructions::printExpression(S2EExecutionState *state)
 {
@@ -317,18 +363,20 @@ void BaseInstructions::printMessage(S2EExecutionState *state, bool isWarning)
     }
 
     std::string str="";
-    if(!address || !state->readString(address, str)) {
+    if(!address || !state->readString(address, str, 4096)) { // SymDrive: added 4096 as maxlen, default is 256
         s2e()->getWarningsStream(state)
                 << "Error reading string message from the guest at address "
-                << hexval(address) << '\n';
-    } else {
+                << hexval(address) << ", printing partial message:" << '\n'; // SymDrive
+    } /* SymDrive else */ {
         llvm::raw_ostream *stream;
         if(isWarning)
             stream = &s2e()->getWarningsStream(state);
         else
             stream = &s2e()->getMessagesStream(state);
-        (*stream) << "Message from guest (" << hexval(address) <<
-                     "): " <<  str << '\n';
+
+        (*stream) << "Guest: " <<  str; // SymDrive
+        //(*stream) << "Message from guest (" << hexval(address) <<
+        //    "): " <<  str /* SymDrive << '\n' */;
     }
 }
 

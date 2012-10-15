@@ -104,6 +104,8 @@ uint32_t ExecutionTracer::writeData(
     ExecutionTraceItemHeader item;
 
     assert(m_LogFile);
+    assert (size > 0); // SymDrive
+    assert (type < TRACE_MAX); // SymDrive
 
     item.timeStamp = llvm::sys::TimeValue::now().usec();
     item.size = size;
@@ -112,7 +114,7 @@ uint32_t ExecutionTracer::writeData(
     item.pid = state->getPid();
 
     if (fwrite(&item, sizeof(item), 1, m_LogFile) != 1) {
-        return 0;
+        assert(false); // SymDrive Was return 0
     }
 
     if (size) {

@@ -607,7 +607,9 @@ llvm::raw_ostream& S2E::getStream(llvm::raw_ostream &stream,
             stream  << "[Node " << m_currentProcessIndex <<
                     "/" << m_currentProcessId << " - State " << state->getID() << "] ";
         }else {
-            stream << "[State " << state->getID() << "] ";
+            stream << "[" << state->getID() << "/" // MJR
+                   << m_s2eExecutor->getStatesCount() << "] ";
+            // stream << "[State " << state->getID() << "] ";  // MJR
         }
     }
     return stream;

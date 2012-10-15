@@ -496,6 +496,8 @@ s2eobj-y += s2e/Plugins/Annotation.o
 s2eobj-y += s2e/Plugins/Searchers/MaxTbSearcher.o
 s2eobj-y += s2e/Plugins/Searchers/CooperativeSearcher.o
 s2eobj-y += s2e/Plugins/Searchers/ConcolicDFSSearcher.o
+s2eobj-y += s2e/Plugins/SymDrive/SymDriveTranslationBlockTracer.o
+s2eobj-y += s2e/Plugins/SymDrive/SymDriveSearcher.o
 s2eobj-y += s2e/Plugins/HostFiles.o
 
 s2eobj-y += s2e/Plugins/MemoryChecker.o
@@ -540,6 +542,8 @@ s2e/Plugins/ExecutionTracers/InstructionCounter.o: QEMU_CXXFLAGS+=-fno-inline
 s2e/Plugins/ExecutionTracers/TranslationBlockTracer.o: QEMU_CXXFLAGS+=-fno-inline
 s2e/Plugins/Searchers/MaxTbSearcher.o: QEMU_CXXFLAGS+=-fno-inline
 s2e/Plugins/Searchers/CooperativeSearcher.o: QEMU_CXXFLAGS+=-fno-inline
+s2e/Plugins/SymDrive/SymDriveTranslationBlockTracer.o: QEMU_CXXFLAGS+=-fno-inline
+s2e/Plugins/SymDrive/SymDriveSearcher.o: QEMU_CXXFLAGS+=-fno-inline
 s2e/Plugins/WindowsApi/NdisHandlers.o: QEMU_CXXFLAGS+=-fno-inline
 s2e/Plugins/WindowsApi/NdisProtocolHandlers.o: QEMU_CXXFLAGS+=-fno-inline
 s2e/Plugins/WindowsApi/NtoskrnlHandlers.o: QEMU_CXXFLAGS+=-fno-inline

@@ -4879,6 +4879,39 @@ tb_page_addr_t get_page_addr_code(CPUArchState *env1, target_ulong addr)
     return qemu_ram_addr_from_host_nofail(p);
 }
 
+#ifdef CONFIG_S2E
+uint64_t symbhw_read(void *opaque, target_phys_addr_t addr, unsigned size);
+void symbhw_write(void *opaque, target_phys_addr_t addr, uint64_t data, unsigned size);
+
+int s2e_issymfunc(struct MemoryRegion *mr, target_ulong addr)
+{
+    subpage_t *mmio;
+    unsigned int idx;
+    MemoryRegionSection *section;
+    void *fr, *fw;
+
+    fr = mr->ops->read;
+    fw = mr->ops->write;
+
+    if (fr == subpage_read &&
+        fw == subpage_write) {
+        int result;
+        mmio = (subpage_t *) mr->opaque;
+        idx = SUBPAGE_IDX(addr);
+        section = &phys_sections[mmio->sub_section[idx]];
+
+        result =
+            (section->mr->ops->read == symbhw_read) &&
+            (section->mr->ops->write == symbhw_write);
+        return result;
+    } else if (fr == symbhw_read &&
+               fw == symbhw_write) {
+        return 1;
+    }
+    return 0;
+}
+#endif
+
 /*
  * A helper function for the _utterly broken_ virtio device model to find out if
  * it's running on a big endian machine. Don't do this at home kids!

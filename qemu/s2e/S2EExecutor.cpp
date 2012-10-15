@@ -159,7 +159,7 @@ namespace {
     cl::opt<unsigned>
     MaxForksOnConcretize("max-forks-on-concretize",
             cl::desc("Maximum number of states to fork when concretizing symbolic value"),
-            cl::init(256));
+                         cl::init(3)); // MJR
 
     cl::opt<bool>
     FlushTBsOnStateSwitch("flush-tbs-on-state-switch",
@@ -390,29 +390,103 @@ void S2EHandler::processTestCase(const klee::ExecutionState &state,
     //Use onTestCaseGeneration event instead.
 }
 
+void S2EExecutor::handlerMJRCommon(Executor* executor,
+                                   ExecutionState* state,
+                                   klee::KInstruction* target,
+                                   int accessType,
+                                   std::vector<klee::ref<klee::Expr> > &args) {
+    assert(dynamic_cast<S2EExecutor*>(executor));
+    S2EExecutor* s2eExecutor = static_cast<S2EExecutor*>(executor);
+
+    // MJR This call corresponds to tcg_llvm_trace_memory_access
+    // tcg_llvm_trace_memory_access parameters are:
+    // vaddr, value, sizeof(value), isWrite
+    // MJR Added for I/O memory tracing:
+    if(!s2eExecutor->m_s2e->getCorePlugin()->onIOMemoryAccess.empty()) {
+        assert(dynamic_cast<S2EExecutionState*>(state));
+        assert(args.size() == 4);
+
+        S2EExecutionState* s2eState = static_cast<S2EExecutionState*>(state);
+
+        // Argument index 0 is the address
+        klee::ref<klee::Expr> vaddr = args[0];
+
+        // Argument index 2 is size in bits:
+        Expr::Width sizeInBits = cast<klee::ConstantExpr>(args[2])->getZExtValue();
+        Expr::Width sizeInBytes = sizeInBits / 8;
+
+        // Argument index 1 is value:
+        klee::ref<Expr> value = klee::ExtractExpr::create(args[1], 0, sizeInBits);
+
+        // Argument index 3 is whether it's a write operation or not
+        bool isWrite = cast<klee::ConstantExpr>(args[3])->getZExtValue();
+
+        s2eExecutor->m_s2e->getCorePlugin()->onIOMemoryAccess.emit(
+            s2eState,
+            accessType,
+            vaddr,            // address
+            value,            // value
+            sizeInBytes,      // size converted to bytes
+            isWrite);         // true = write, false = read
+    }
+}
+
 void S2EExecutor::handlerTraceMemoryAccess(Executor* executor,
+                                           ExecutionState* state,
+                                           klee::KInstruction* target,
+                                           std::vector<klee::ref<klee::Expr> > &args)
+{
+    handlerMJRCommon(executor, state, target, 1, args);
+}
+
+void S2EExecutor::handlerTracePortAccess(Executor* executor,
                                      ExecutionState* state,
                                      klee::KInstruction* target,
                                      std::vector<klee::ref<klee::Expr> > &args)
 {
-    assert(dynamic_cast<S2EExecutor*>(executor));
+    // assert(dynamic_cast<S2EExecutor*>(executor));
+    // S2EExecutor* s2eExecutor = static_cast<S2EExecutor*>(executor);
 
-    S2EExecutor* s2eExecutor = static_cast<S2EExecutor*>(executor);
-    if(!s2eExecutor->m_s2e->getCorePlugin()->onDataMemoryAccess.empty()) {
-        assert(dynamic_cast<S2EExecutionState*>(state));
-        S2EExecutionState* s2eState = static_cast<S2EExecutionState*>(state);
+    // if(!s2eExecutor->m_s2e->getCorePlugin()->onIOMemoryAccess.empty()) {
+    //     assert(dynamic_cast<S2EExecutionState*>(state));
+    //     assert(args.size() == 4);
 
-        assert(args.size() == 6);
+    //     S2EExecutionState* s2eState = static_cast<S2EExecutionState*>(state);
+    //     int accessType = 0; // Port I/O
 
-        Expr::Width width = cast<klee::ConstantExpr>(args[3])->getZExtValue();
-        bool isWrite = cast<klee::ConstantExpr>(args[4])->getZExtValue();
-        bool isIO    = cast<klee::ConstantExpr>(args[5])->getZExtValue();
+    //     // The indexes into the args array correspond with the parameters
+    //     // passed to the tcg_llvm_trace_port_access function
+    //     // Argument index 0 is the port number
+    //     ref<Expr> port = args[0];
 
-        ref<Expr> value = klee::ExtractExpr::create(args[2], 0, width);
+    //     // Argument index 2 is the size in bytes:
+    //     int sizeInBytes = cast<klee::ConstantExpr>(args[2])->getZExtValue();
+    //     Expr::Width sizeInBits = sizeInBytes * 8;
 
-        s2eExecutor->m_s2e->getCorePlugin()->onDataMemoryAccess.emit(
-                s2eState, args[0], args[1], value, isWrite, isIO);
-    }
+    //     // Argument index 1 is the value:
+    //     ref<Expr> value = klee::ExtractExpr::create(args[1], 0, sizeInBits);
+
+    //     // Argument index 3 is whether it's a write operation or not
+    //     bool isWrite = cast<klee::ConstantExpr>(args[3])->getZExtValue();
+
+    //     s2eExecutor->m_s2e->getCorePlugin()->onIOMemoryAccess.emit(
+    //         s2eState,
+    //         accessType,
+    //         port,
+    //         value,
+    //         sizeInBytes,
+    //         isWrite);
+    // }
+
+    handlerMJRCommon(executor, state, target, 0, args);
+}
+
+void S2EExecutor::handlerTraceDMAAccess(Executor* executor,
+                                        ExecutionState* state,
+                                        klee::KInstruction* target,
+                                        std::vector<klee::ref<klee::Expr> > &args)
+{
+    handlerMJRCommon(executor, state, target, 2, args);
 }
 
 void S2EExecutor::handlerTraceInstruction(klee::Executor* executor,
@@ -456,31 +530,6 @@ void S2EExecutor::handlerOnTlbMiss(Executor* executor,
     constAddress = cast<klee::ConstantExpr>(addr)->getZExtValue(64);
 
     s2e_on_tlb_miss(g_s2e, s2eState, constAddress, isWrite);
-}
-
-void S2EExecutor::handlerTracePortAccess(Executor* executor,
-                                     ExecutionState* state,
-                                     klee::KInstruction* target,
-                                     std::vector<klee::ref<klee::Expr> > &args)
-{
-    assert(dynamic_cast<S2EExecutor*>(executor));
-
-    S2EExecutor* s2eExecutor = static_cast<S2EExecutor*>(executor);
-
-    if(!s2eExecutor->m_s2e->getCorePlugin()->onPortAccess.empty()) {
-        assert(dynamic_cast<S2EExecutionState*>(state));
-        S2EExecutionState* s2eState = static_cast<S2EExecutionState*>(state);
-
-        assert(args.size() == 4);
-
-        Expr::Width width = cast<klee::ConstantExpr>(args[2])->getZExtValue();
-        bool isWrite = cast<klee::ConstantExpr>(args[3])->getZExtValue();
-
-        ref<Expr> value = klee::ExtractExpr::create(args[1], 0, width);
-
-        s2eExecutor->m_s2e->getCorePlugin()->onPortAccess.emit(
-                s2eState, args[0], value, isWrite);
-    }
 }
 
 void S2EExecutor::handleForkAndConcretize(Executor* executor,
@@ -757,6 +806,8 @@ S2EExecutor::S2EExecutor(S2E* s2e, TCGLLVMContext *tcgLLVMContext,
 
     __DEFINE_EXT_FUNCTION(s2e_ismemfunc)
     __DEFINE_EXT_FUNCTION(s2e_notdirty_mem_write)
+        __DEFINE_EXT_FUNCTION(s2e_issymfunc) // MJR
+        __DEFINE_EXT_FUNCTION(s2e_establishIOMap) // MJR
 
     __DEFINE_EXT_FUNCTION(cpu_io_recompile)
     __DEFINE_EXT_FUNCTION(can_do_io)
@@ -857,9 +908,10 @@ S2EExecutor::S2EExecutor(S2E* s2e, TCGLLVMContext *tcgLLVMContext,
     if (!execute_llvm) {
         Function* function;
 
-        function = kmodule->module->getFunction("tcg_llvm_trace_memory_access");
-        assert(function);
-        addSpecialFunctionHandler(function, handlerTraceMemoryAccess);
+        // MJR
+        //function = kmodule->module->getFunction("tcg_llvm_trace_memory_access");
+        //assert(function);
+        //addSpecialFunctionHandler(function, handlerTraceMemoryAccess);
 
         function = kmodule->module->getFunction("tcg_llvm_trace_port_access");
         assert(function);
@@ -1140,9 +1192,9 @@ void S2EExecutor::switchToConcrete(S2EExecutionState *state)
     if (m_forceConcretizations) {
         //XXX: Find a adhoc dirty way to implement overconstrained consistency model
         //There should be a consistency plugin somewhere else
-        s2e::plugins::ModuleExecutionDetector *md =
-                dynamic_cast<s2e::plugins::ModuleExecutionDetector*>(m_s2e->getPlugin("ModuleExecutionDetector"));
-        if (md && !md->getCurrentDescriptor(state)) {
+        //s2e::plugins::ModuleExecutionDetector *md = // MJR commented out
+        //        dynamic_cast<s2e::plugins::ModuleExecutionDetector*>(m_s2e->getPlugin("ModuleExecutionDetector"));
+        //if (md && !md->getCurrentDescriptor(state)) { // MJR We don't need this here
 
             if(!wos->isAllConcrete()) {
                 /* The object contains symbolic values. We have to
@@ -1157,7 +1209,7 @@ void S2EExecutor::switchToConcrete(S2EExecutionState *state)
                     }
                 }
             }
-        }
+            // } // MJR
     }
 
     //assert(os->isAllConcrete());
@@ -2182,7 +2234,7 @@ S2EExecutor::StatePair S2EExecutor::fork(ExecutionState &current,
                             ref<Expr> condition, bool isInternal)
 {
     assert(dynamic_cast<S2EExecutionState*>(&current));
-    assert(!static_cast<S2EExecutionState*>(&current)->m_runningConcrete);
+    // assert(!static_cast<S2EExecutionState*>(&current)->m_runningConcrete); // MJR moved below
 
     StatePair res;
 
@@ -2196,6 +2248,7 @@ S2EExecutor::StatePair S2EExecutor::fork(ExecutionState &current,
 
         assert(dynamic_cast<S2EExecutionState*>(res.first));
         assert(dynamic_cast<S2EExecutionState*>(res.second));
+        assert(!static_cast<S2EExecutionState*>(&current)->m_runningConcrete); // MJR moved from above
 
         std::vector<S2EExecutionState*> newStates(2);
         std::vector<ref<Expr> > newConditions(2);
@@ -2332,7 +2385,6 @@ void S2EExecutor::yieldState(ExecutionState &s)
 
     // Skip the opcode
     state.writeCpuState(CPU_OFFSET(eip), state.getPc() + 10, 32);
-
     // Stop current execution
     state.writeCpuState(CPU_OFFSET(exception_index), EXCP_S2E, 8*sizeof(int));
     throw CpuExitException();
@@ -2496,6 +2548,14 @@ void S2EExecutor::updateStats(S2EExecutionState *state)
 {
     state->m_stats.updateStats(state);
     processTimers(state, 0);
+}
+
+std::set<ExecutionState *> &S2EExecutor::MJRGetAllStates(void) { // MJR
+    return states;
+}
+
+const std::set<ExecutionState *> &S2EExecutor::MJRGetAllStates(void) const { // MJR
+    return states;
 }
 
 } // namespace s2e

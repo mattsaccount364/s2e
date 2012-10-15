@@ -146,9 +146,10 @@ int s2e_ismemfunc(struct MemoryRegion *mr, int isWrite);
 
 uintptr_t s2e_notdirty_mem_write(target_phys_addr_t ram_addr);
 int s2e_ismemfunc(struct MemoryRegion *mr, int isWrite);
-
+int s2e_issymfunc(struct MemoryRegion *opaque, target_ulong addr); // MJR
 
 #endif
 
+extern int g_tracing_enabled; // MJR                                                                                   
 
 #endif

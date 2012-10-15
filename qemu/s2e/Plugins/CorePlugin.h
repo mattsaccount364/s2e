@@ -65,6 +65,7 @@ typedef sigc::signal<void, S2EExecutionState*, uint64_t /* pc */> ExecutionSigna
   * This is necessary tp speedup checks (and avoid using signals) */
 typedef bool (*SYMB_PORT_CHECK)(uint16_t port, void *opaque);
 typedef bool (*SYMB_MMIO_CHECK)(uint64_t physaddress, uint64_t size, void *opaque);
+typedef bool (*ESTABLISH_IO_MAP_FN)(std::string origin, void *opaque); // SymDrive added
 
 class CorePlugin : public Plugin {
     S2E_PLUGIN
@@ -76,6 +77,10 @@ private:
     void *m_isPortSymbolicOpaque;
     void *m_isMmioSymbolicOpaque;
 
+    // SymDrive added:
+    ESTABLISH_IO_MAP_FN m_establishIOMap;
+    void *m_establishIOMapOpaque;
+
 public:
     CorePlugin(S2E* s2e): Plugin(s2e) {
         m_Timer = NULL;
@@ -83,6 +88,7 @@ public:
         m_isMmioSymbolicCb = NULL;
         m_isPortSymbolicOpaque = NULL;
         m_isMmioSymbolicOpaque = NULL;
+        m_establishIOMap = NULL; // SymDrive
     }
 
     void initialize();
@@ -98,6 +104,11 @@ public:
         m_isMmioSymbolicOpaque = opaque;
     }
 
+    void setIoMapCallback(ESTABLISH_IO_MAP_FN cb, void *opaque) { // SymDrive added this fn
+        m_establishIOMap = cb;
+        m_establishIOMapOpaque = opaque;
+    }
+
     inline bool isPortSymbolic(uint16_t port) const {
         if (m_isPortSymbolicCb) {
             return m_isPortSymbolicCb(port, m_isPortSymbolicOpaque);
@@ -108,6 +119,13 @@ public:
     inline bool isMmioSymbolic(uint64_t physAddress, uint64_t size) const {
         if (m_isMmioSymbolicCb) {
             return m_isMmioSymbolicCb(physAddress, size, m_isMmioSymbolicOpaque);
+        }
+        return false;
+    }
+
+    inline bool establishIOMap(std::string tag) const { // SymDrive added
+        if (m_establishIOMap) {
+            return m_establishIOMap(tag, m_establishIOMapOpaque);
         }
         return false;
     }
@@ -186,6 +204,17 @@ public:
                  klee::ref<klee::Expr> /* value */,
                  bool /* isWrite */, bool /* isIO */>
             onDataMemoryAccess;
+
+    /** Signal that is emitted on each I/O memory access */
+    // SymDrive, added this:
+    sigc::signal<void,
+        S2EExecutionState*,     /* state */
+        int,                    /* access type */
+        klee::ref<klee::Expr>,  /* virtualAddress */
+        klee::ref<klee::Expr>,  /* value */
+        int,                    /* size in bytes */
+        bool>                   /* isWrite */
+        onIOMemoryAccess;
 
     /** Signal that is emitted on each port access */
     sigc::signal<void, S2EExecutionState*,

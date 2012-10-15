@@ -147,8 +147,9 @@ void s2e_on_exception(unsigned intNb);
 
 /** Called on memory accesses from generated code */
 void s2e_trace_memory_access(
-        uint64_t vaddr, uint64_t haddr, uint8_t* buf, unsigned size,
-        int isWrite, int isIO);
+        struct S2E *s2e, struct S2EExecutionState* state, // MJR
+        uint64_t vaddr, /* uint64_t haddr, MJR */ uint8_t* buf, unsigned size,
+        int isWrite /*, int isIO MJR */);
 
 /** Called on port access from helper code */
 void s2e_trace_port_access(
@@ -328,6 +329,8 @@ void s2e_on_initialization_complete(void);
 
 void s2e_on_monitor_event(struct QDict *ret);
 
+void s2e_establishIOMap(int prefix, uint32_t port, uint32_t pc, uint32_t unique_id); // MJR added
+
 //XXX: Provide a means of including KLEE header
 /* Return a possible constant value for the input expression. This
    allows programs to forcibly concretize values on their own. */
@@ -349,9 +352,9 @@ int s2e_is_forking();
 uint64_t tcg_llvm_fork_and_concretize(uint64_t value,
                                       uint64_t knownMin,
                                       uint64_t knownMax);
-void tcg_llvm_trace_memory_access(uint64_t vaddr, uint64_t haddr,
-                                  uint64_t value, uint32_t bits,
-                                  uint8_t isWrite, uint8_t isIo);
+void tcg_llvm_trace_memory_access(uint64_t vaddr, /* uint64_t haddr, MJR */
+                                  uint64_t value, uint32_t /* bits MJR */ sizeInBytes,
+                                  uint8_t isWrite /*, uint8_t isIo MJR */);
 void tcg_llvm_trace_port_access(uint64_t port, uint64_t value,
                                 unsigned bits, int isWrite);
 //#endif

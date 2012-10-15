@@ -386,8 +386,8 @@ TCGLLVMContextPrivate::~TCGLLVMContextPrivate()
 #ifdef CONFIG_S2E
 void TCGLLVMContextPrivate::initializeHelpers()
 {
-    m_helperTraceMemoryAccess =
-            m_module->getFunction("tcg_llvm_trace_memory_access");
+//    m_helperTraceMemoryAccess = // MJR
+//            m_module->getFunction("tcg_llvm_trace_memory_access");
 
     m_helperTraceInstruction =
             m_module->getFunction("tcg_llvm_trace_instruction");
@@ -407,7 +407,7 @@ void TCGLLVMContextPrivate::initializeHelpers()
     m_qemu_st_helpers[3] = m_module->getFunction("__stq_mmu");
     m_qemu_st_helpers[4] = m_module->getFunction("__stq_mmu");
 
-    assert(m_helperTraceMemoryAccess);
+    // assert(m_helperTraceMemoryAccess); // MJR
     for(int i = 0; i < 5; ++i) {
         assert(m_qemu_ld_helpers[i]);
         assert(m_qemu_st_helpers[i]);

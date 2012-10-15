@@ -48,7 +48,8 @@ uint8_t klee_int8(const char *name);
 uint16_t klee_int16(const char *name);
 uint32_t klee_int32(const char *name);
 void uint32_to_string(uint32_t n, char *str);
-void trace_port(char *buf, const char *prefix, uint32_t port, uint32_t pc);
+
+void trace_port(char *buf, const char *prefix, uint32_t port, uint32_t pc, uint32_t unique_id /* MJR */);
 
 uint8_t klee_int8(const char *name) {
     uint8_t ret;
@@ -83,7 +84,7 @@ void uint32_to_string(uint32_t n, char *str)
   str[7] = hextable[((n >> 0) & 0xF)];
 }
 
-void trace_port(char *buf, const char *prefix, uint32_t port, uint32_t pc)
+void trace_port(char *buf, const char *prefix, uint32_t port, uint32_t pc, uint32 unique_id /* MJR */)
 {
     while(*prefix) {
         *buf = *prefix;
@@ -94,7 +95,13 @@ void trace_port(char *buf, const char *prefix, uint32_t port, uint32_t pc)
     buf+=8;
     *buf = '_';
     buf++;
+
     uint32_to_string(pc, buf);
+    buf+=8;
+    *buf = '_';
+    buf++;
+
+    uint32_to_string(unique_id, buf);
     buf+=8;
     *buf = 0;
 }

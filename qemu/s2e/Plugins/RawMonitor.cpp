@@ -110,6 +110,13 @@ bool RawMonitor::initSection(const std::string &cfgKey, const std::string &svcId
         return false;
     }
 
+    // SymDrive added this block:
+    cfg.primaryModule = s2e()->getConfig()->getBool(cfgKey + ".primaryModule", false, &ok);
+    if (!ok) {
+        s2e()->getWarningsStream() << "You must specify " << cfgKey << "primaryModule\n";
+        return false;
+    }
+
     m_cfg.push_back(cfg);
     return true;
 }
@@ -231,6 +238,7 @@ void RawMonitor::opLoadModule(S2EExecutionState *state)
     }
 
     moduleDescriptor.Pid = moduleConfig.kernelMode ? 0 : state->getPid();
+    moduleDescriptor.PrimaryModule = moduleConfig.primaryModule; // SymDrive
 
     s2e()->getDebugStream() << "RawMonitor loaded " << moduleDescriptor.Name << " " <<
             hexval(moduleDescriptor.LoadBase) << " " << hexval(moduleDescriptor.Size) << "\n";
@@ -333,6 +341,7 @@ void RawMonitor::loadModule(S2EExecutionState *state, const Cfg &c, bool skipIfD
     md.Size = c.size;
     md.Pid = c.kernelMode ? 0 : state->getPid();
     md.EntryPoint = c.entrypoint;
+    md.PrimaryModule = c.primaryModule; // SymDrive
 
     s2e()->getDebugStream() << "RawMonitor loaded " << c.name << " " <<
             hexval(c.start) << ' ' << hexval(c.size) << '\n';
